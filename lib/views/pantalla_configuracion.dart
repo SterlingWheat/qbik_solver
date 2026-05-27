@@ -1,0 +1,140 @@
+import 'package:flutter/material.dart';
+import '../gestores/gestor_configuracion.dart';
+import '../widgets/fondo_decorativo.dart';
+
+class PantallaConfiguracion extends StatefulWidget {
+  const PantallaConfiguracion({super.key});
+
+  @override
+  State<PantallaConfiguracion> createState() => _EstadoPantallaConfiguracion();
+}
+
+class _EstadoPantallaConfiguracion extends State<PantallaConfiguracion> {
+  @override
+  Widget build(BuildContext context) {
+    final gestorConfig = GestorConfiguracion();
+    final esOscuro = Theme.of(context).brightness == Brightness.dark;
+    final colorTexto = esOscuro ? Colors.white : Colors.black87;
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: FondoDecorativo(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.arrow_back_ios_new_rounded, color: colorTexto),
+                    onPressed: () {
+                      gestorConfig.ejecutarVibracion();
+                      Navigator.pop(context);
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Configuración',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: colorTexto,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(24.0),
+                physics: const BouncingScrollPhysics(),
+                children: [
+                  _construirSeccion(
+                    context,
+                    titulo: 'Apariencia',
+                    hijos: [
+                      ListTile(
+                        onTap: () {
+                          gestorConfig.establecerTemaOscuro(!gestorConfig.esTemaOscuro);
+                          setState(() {}); // Forzar refresco local visual
+                        },
+                        leading: Icon(Icons.dark_mode_rounded, color: Theme.of(context).colorScheme.primary),
+                        title: Text('Tema Oscuro', style: TextStyle(color: colorTexto, fontWeight: FontWeight.w500)),
+                        subtitle: Text('Reduce la fatiga visual', style: TextStyle(color: colorTexto.withOpacity(0.6))),
+                        trailing: Switch(
+                          value: gestorConfig.esTemaOscuro,
+                          onChanged: (valor) {
+                            gestorConfig.establecerTemaOscuro(valor);
+                            setState(() {});
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  _construirSeccion(
+                    context,
+                    titulo: 'Accesibilidad y Sistema',
+                    hijos: [
+                      ListTile(
+                        onTap: () {
+                          gestorConfig.establecerVibracionActiva(!gestorConfig.vibracionActiva);
+                          setState(() {});
+                        },
+                        leading: Icon(Icons.vibration_rounded, color: Theme.of(context).colorScheme.primary),
+                        title: Text('Vibración Háptica', style: TextStyle(color: colorTexto, fontWeight: FontWeight.w500)),
+                        subtitle: Text('Respuesta física al pulsar botones', style: TextStyle(color: colorTexto.withOpacity(0.6))),
+                        trailing: Switch(
+                          value: gestorConfig.vibracionActiva,
+                          onChanged: (valor) {
+                            gestorConfig.establecerVibracionActiva(valor);
+                            setState(() {});
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _construirSeccion(BuildContext context, {required String titulo, required List<Widget> hijos}) {
+    final esOscuro = Theme.of(context).brightness == Brightness.dark;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 8.0, bottom: 8.0),
+          child: Text(
+            titulo.toUpperCase(),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+              color: esOscuro ? Colors.white60 : Colors.black54,
+            ),
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: esOscuro ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.04),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: esOscuro ? Colors.white.withOpacity(0.12) : Colors.black.withOpacity(0.08),
+              width: 1,
+            ),
+          ),
+          child: Column(children: hijos),
+        ),
+      ],
+    );
+  }
+}

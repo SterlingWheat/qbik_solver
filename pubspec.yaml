@@ -1,0 +1,35 @@
+name: qbik_solver
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: ^0.10.5          # Para acceder a la cámara del celular
+  tflite_flutter: ^0.11.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/models/yolo_cubos.tflite
+    - assets/models/clasificador_colores.tflite
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/logo_app.png"
+  adaptive_icon_background: "#120C1F"
+  adaptive_icon_foreground: "assets/icon/logo_app.png"
+
+dependency_overrides:
+  tflite_flutter: ^0.10.4
