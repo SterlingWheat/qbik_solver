@@ -1,6 +1,6 @@
 /// Clase que representa el estado matemático puro de un Cubo Rubik 2x2.
-/// Utiliza un arreglo plano de 24 posiciones para optimizar drásticamente 
-/// la velocidad del algoritmo de resolución (BFS).
+/// Utiliza un arreglo plano de 24 posiciones para optimizar drásticamente
+/// la velocidad del algoritmo de resolución (IDA*).
 class EstadoCubo2x2 {
   // Las 24 pegatinas (stickers) del cubo.
   // Mapeo de caras: 0:U (Arriba), 1:R (Derecha), 2:F (Frente), 3:D (Abajo), 4:L (Izquierda), 5:B (Atrás)
@@ -27,9 +27,11 @@ class EstadoCubo2x2 {
     return EstadoCubo2x2(List<int>.from(pegatinas));
   }
 
-  /// Comprueba si el estado actual es un cubo resuelto.
-  /// No asume una orientación específica (ej. blanco arriba), solo verifica
-  /// que las 4 pegatinas de cada cara sean del mismo color.
+  /// Comprueba si el estado actual es un cubo resuelto bajo CUALQUIER orientación global.
+  ///
+  /// Un cubo 2x2 está resuelto si y solo si cada cara tiene sus 4 pegatinas del mismo color,
+  /// sin importar cuál color está arriba o al frente.
+  /// Esto cubre las 24 orientaciones válidas del grupo de rotaciones del cubo.
   bool get estaResuelto {
     for (int cara = 0; cara < 6; cara++) {
       int idxBase = cara * 4;
@@ -43,13 +45,13 @@ class EstadoCubo2x2 {
     return true;
   }
 
-  /// Genera un identificador único rápido para usar en estructuras HashSet durante el BFS.
+  /// Genera un identificador único rápido para usar en estructuras Set durante IDA*.
   String get hashEstado => String.fromCharCodes(pegatinas.map((c) => c + 65));
 
   /// Aplica un movimiento algorítmico estándar (ej. "U", "R'", "F2") y retorna el nuevo estado.
   EstadoCubo2x2 aplicarMovimiento(String movimiento) {
     EstadoCubo2x2 nuevoEstado = clonar();
-    
+
     // Parseo de movimientos (Base + Modificador)
     String base = movimiento[0];
     bool inverso = movimiento.contains("'");
