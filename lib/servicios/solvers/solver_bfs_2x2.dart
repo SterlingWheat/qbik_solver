@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../../modelos/estado_cubo_2x2.dart';
 
 /// Servicio de resolución óptima para el Cubo Rubik 2x2.
-/// ALGORITMO: IDA* (Iterative Deepening A*)
+/// ALGORITMO: IDA* (Iterative Deepening A*) Optimizado
 class SolverBFS2x2 {
 
   /// Ejecuta el algoritmo en un hilo secundario (Isolate) para no congelar la UI de Flutter.
@@ -11,37 +11,34 @@ class SolverBFS2x2 {
   }
 
   static List<String> _resolverIsolate(List<int> pegatinasIniciales) {
-    debugPrint("=== [SOLVER 2x2] INICIANDO IDA* ===");
-    debugPrint("[SOLVER] Estado inicial: $pegatinasIniciales");
-
+    debugPrint("=== [SOLVER 2x2] INICIANDO IDA* OPTIMIZADO ===");
     final EstadoCubo2x2 estado = EstadoCubo2x2(pegatinasIniciales);
 
-    // Cortocircuito: cubo ya resuelto (cualquier orientación)
+    // Cortocircuito: si ya está resuelto, devolvemos lista vacía
     if (estado.estaResuelto) {
-      debugPrint("[SOLVER] Cubo ya resuelto. Devolviendo solución vacía.");
       return [];
     }
 
-    final List<String> todosLosMovimientos = [];
-    for (var c in ['U', 'D', 'R', 'L', 'F', 'B']) {
-      for (var m in ['', "'", '2']) {
-        todosLosMovimientos.add(c + m);
-      }
-    }
+    // 🔥 OPTIMIZACIÓN CRÍTICA:
+    // En lugar de usar las 6 caras (18 movimientos), usamos solo U, R y F (9 movimientos).
+    // Esto ancla la esquina inferior-izquierda-trasera y reduce los cálculos masivamente.
+    // Como 'estaResuelto' revisa las caras sin importar la orientación global, funcionará perfecto.
+    final List<String> movimientosOptimos = [
+      'U', "U'", 'U2',
+      'R', "R'", 'R2',
+      'F', "F'", 'F2'
+    ];
 
     int umbral = _heuristica(estado);
-    debugPrint("[SOLVER] Heurística inicial: $umbral");
-
-    const int LIMITE_ABSOLUTO = 20;
+    const int LIMITE_ABSOLUTO = 12; // El máximo de movimientos necesarios (God's Number) para un 2x2 es 11.
     List<String> ruta = [];
 
     for (int iteracion = 0; umbral <= LIMITE_ABSOLUTO; iteracion++) {
-      debugPrint("[SOLVER] IDA* iteración $iteracion, umbral=$umbral");
-
-      int resultado = _buscar(estado, 0, umbral, ruta, todosLosMovimientos, '');
+      debugPrint("[SOLVER] Buscando solución a profundidad máxima de $umbral movimientos...");
+      int resultado = _buscar(estado, 0, umbral, ruta, movimientosOptimos, '');
 
       if (resultado == _ENCONTRADO) {
-        debugPrint("✅ [SOLVER] Solución encontrada en ${ruta.length} movimientos: $ruta");
+        debugPrint("✅ [SOLVER] Solución óptima encontrada en ${ruta.length} movimientos: $ruta");
         return ruta;
       }
 
@@ -50,9 +47,8 @@ class SolverBFS2x2 {
       umbral = resultado;
     }
 
-    debugPrint("❌ [SOLVER] Sin solución. Estado físicamente imposible.");
     throw Exception(
-      "Mezcla inalcanzable. Revisa físicamente tu cubo; podría tener una esquina mal ensamblada."
+      "Mezcla inalcanzable. Revisa los colores en pantalla; tu cubo podría estar mal ensamblado físicamente."
     );
   }
 
@@ -69,8 +65,8 @@ class SolverBFS2x2 {
     for (final String mov in movimientos) {
       final String cara = mov[0];
 
+      // Poda estricta: No girar la misma cara dos veces seguidas en la misma rama
       if (cara == caraAnterior) continue;
-      if (_esCandidatoRedundante(cara, caraAnterior)) continue;
 
       final EstadoCubo2x2 siguiente = estado.aplicarMovimiento(mov);
       ruta.add(mov);
@@ -90,20 +86,14 @@ class SolverBFS2x2 {
     for (int cara = 0; cara < 6; cara++) {
       final int base = cara * 4;
       final int color = estado.pegatinas[base];
+      
+      // Si alguna pegatina de la cara no coincide con la primera, no es uniforme
       if (estado.pegatinas[base + 1] != color ||
           estado.pegatinas[base + 2] != color ||
           estado.pegatinas[base + 3] != color) {
         carasNoUniformes++;
       }
     }
-    return (carasNoUniformes + 3) ~/ 4;
-  }
-
-  static bool _esCandidatoRedundante(String caraActual, String caraAnterior) {
-    if (caraAnterior.isEmpty) return false;
-    if (caraAnterior == 'D' && caraActual == 'U') return true;
-    if (caraAnterior == 'L' && caraActual == 'R') return true;
-    if (caraAnterior == 'B' && caraActual == 'F') return true;
-    return false;
+    return carasNoUniformes == 0 ? 0 : ((carasNoUniformes + 3) ~/ 4);
   }
 }

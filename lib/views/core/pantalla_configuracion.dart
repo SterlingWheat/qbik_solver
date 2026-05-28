@@ -65,6 +65,25 @@ class PantallaConfiguracion extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                   
+                  // 🔥 NUEVA SECCIÓN: Inteligencia Artificial
+                  _construirSeccion(
+                    esOscuro: esOscuro,
+                    titulo: 'Inteligencia Artificial',
+                    hijos: [
+                      Obx(() => ListTile(
+                        onTap: () => gestorConfig.establecerUsarGeminiAPI(!gestorConfig.usarGeminiAPI.value),
+                        leading: Icon(Icons.cloud_sync_rounded, color: Theme.of(context).colorScheme.primary),
+                        title: Text('Escáner en la Nube (Gemini)', style: TextStyle(color: colorTexto, fontWeight: FontWeight.w500)),
+                        subtitle: Text('Alta precisión. Requiere conexión a internet. Si se desactiva, usará el modelo rápido local.', style: TextStyle(color: colorTexto.withOpacity(0.6))),
+                        trailing: Switch(
+                          value: gestorConfig.usarGeminiAPI.value,
+                          onChanged: (valor) => gestorConfig.establecerUsarGeminiAPI(valor),
+                        ),
+                      )),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
                   _construirSeccion(
                     esOscuro: esOscuro,
                     titulo: 'Accesibilidad y Sistema',

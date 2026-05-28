@@ -1,19 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-// Importaciones con la nueva estructura de carpetas
+// Importaciones con la estructura de carpetas del proyecto
 import 'gestores/globales/gestor_configuracion.dart';
 import 'gestores/globales/gestor_estadisticas.dart';
 import 'servicios/ia/servicio_ia_vision.dart';
+import 'servicios/ia/servicio_gemini_vision.dart'; // 🔥 Nuevo servicio integrado
 import 'rutas/rutas_app.dart';
 import 'rutas/paginas_app.dart';
 
-void main() {
-  // 1. Inyectamos los Servicios (Viven durante toda la vida de la app)
-  // Esto carga los modelos de IA de TensorFlow Lite en segundo plano
-  Get.put(ServicioIAVision()); 
+void main() async {
+  // Garantiza que los canales de comunicación nativos estén listos antes de inicializaciones asíncronas
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  try {
+    // Carga las variables de entorno (.env) para leer de forma segura la API Key de Gemini
+    await dotenv.load(fileName: ".env");
+    debugPrint("✅ Variables de entorno cargadas correctamente.");
+  } catch (e) {
+    debugPrint("🚨 Error al cargar el archivo de entorno .env: $e");
+  }
 
-  // 2. Inyectamos los Gestores Globales
+  // 1. Inyectamos los Servicios (Permanecen en memoria durante toda la vida de la app)
+  // Inicializa la carga en segundo plano de los modelos locales TensorFlow Lite / YOLOv8
+  Get.put(ServicioIAVision()); 
+  
+  // 🔥 INYECCIÓN DE GEMINI: Registramos el cliente de la nube de manera global
+  Get.put(ServicioGeminiVision());
+
+  // 2. Inyectamos los Gestores Globales Reactivos
   Get.put(GestorConfiguracion());
   Get.put(GestorEstadisticas());
   
