@@ -89,6 +89,25 @@ class PantallaConfiguracion extends StatelessWidget {
                     titulo: 'Accesibilidad y Sistema',
                     hijos: [
                       Obx(() => ListTile(
+                        onTap: () => gestorConfig.establecerNarracionVoz(!gestorConfig.narracionVozActiva.value),
+                        leading: Icon(Icons.record_voice_over_rounded, color: Theme.of(context).colorScheme.primary),
+                        title: Text('Narración de Movimientos', style: TextStyle(color: colorTexto, fontWeight: FontWeight.w500)),
+                        subtitle: Text('Lee en voz alta las instrucciones de la solución', style: TextStyle(color: colorTexto.withOpacity(0.6))),
+                        trailing: Switch(
+                          value: gestorConfig.narracionVozActiva.value,
+                          onChanged: (valor) => gestorConfig.establecerNarracionVoz(valor),
+                        ),
+                      )),
+                    ],
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  _construirSeccion(
+                    esOscuro: esOscuro,
+                    titulo: 'Accesibilidad y Sistema',
+                    hijos: [
+                      Obx(() => ListTile(
                         onTap: () => gestorConfig.establecerVibracionActiva(!gestorConfig.vibracionActiva.value),
                         leading: Icon(Icons.vibration_rounded, color: Theme.of(context).colorScheme.primary),
                         title: Text('Vibración Háptica', style: TextStyle(color: colorTexto, fontWeight: FontWeight.w500)),

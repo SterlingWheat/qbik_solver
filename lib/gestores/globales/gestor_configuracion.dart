@@ -85,4 +85,13 @@ class GestorConfiguracion extends GetxController {
       HapticFeedback.vibrate();
     }
   }
+
+  // Agrega esta variable junto a las demás (esTemaOscuro, vibracionActiva, etc.)
+  var narracionVozActiva = true.obs;
+
+  // Agrega este método al final de la clase:
+  void establecerNarracionVoz(bool valor) {
+    narracionVozActiva.value = valor;
+    ejecutarVibracion();
+  }
 }

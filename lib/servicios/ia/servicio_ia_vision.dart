@@ -1,20 +1,18 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:camera/camera.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 import 'package:get/get.dart';
-import 'dart:math';
 
-/// Servicio de Visión por Computadora (IA) para detectar y clasificar los colores del cubo.
-/// Convertido a GetxService para manejar eficientemente la memoria de los modelos TFLite.
+/// Servicio de Visión Local (YOLOv8 + CNN) para detectar y clasificar colores.
 class ServicioIAVision extends GetxService {
   Interpreter? _yoloInterpreter;
   Interpreter? _cnnInterpreter;
 
   // --- CONFIGURACIÓN DE MODELOS ---
-  static const int _yoloSize = 416; // Tamaño ajustado al modelo exportado
-  static const int _cnnSize = 64;   // Tamaño de entrada de la CNN (64x64)
+  // 🔥 CORRECCIÓN: Cambiado de 416 a 640 para coincidir con la arquitectura de tu YOLOv8 exportado
+  static const int _yoloSize = 640; 
+  static const int _cnnSize = 64;   
 
   // Mapeo de colores ordenado alfabéticamente (estándar de Keras)
   static const List<Color> _etiquetasColores = [
@@ -29,75 +27,47 @@ class ServicioIAVision extends GetxService {
   @override
   void onInit() {
     super.onInit();
-    // Inicializamos los modelos en segundo plano apenas se inyecta el servicio
     _inicializarModelos();
   }
 
   @override
   void onClose() {
-    // Liberamos la RAM cerrando los intérpretes cuando el servicio se destruye
     _yoloInterpreter?.close();
     _cnnInterpreter?.close();
     super.onClose();
   }
 
-  /// Carga ambos modelos en memoria
   Future<void> _inicializarModelos() async {
     try {
       final opciones = InterpreterOptions()..threads = 4;
-      
       _yoloInterpreter = await Interpreter.fromAsset('assets/models/yolo_cubos.tflite', options: opciones);
       _cnnInterpreter = await Interpreter.fromAsset('assets/models/clasificador_colores.tflite', options: opciones);
-      
-      var tensorEntrada = _cnnInterpreter!.getInputTensor(0);
-      var tensorSalida = _cnnInterpreter!.getOutputTensor(0);
-      debugPrint("🧠 [INFO CNN] Entrada: Tipo ${tensorEntrada.type}, Forma ${tensorEntrada.shape}");
-      debugPrint("🧠 [INFO CNN] Salida: Tipo ${tensorSalida.type}, Forma ${tensorSalida.shape}");
-      
-      debugPrint("✅ Modelos TFLite cargados correctamente en GetxService.");
+      debugPrint("✅ Modelos TFLite locales cargados correctamente a resolución $_yoloSize.");
     } catch (e) {
       debugPrint("❌ Error al cargar los modelos TFLite: $e");
     }
   }
 
-  /// PROCESO PRINCIPAL: Recibe el fotograma de la cámara y devuelve los 4 colores del cubo 2x2.
-  Future<List<Color>?> procesarFrame2x2(CameraImage imagenCamara) async {
+  /// PROCESO ESTÁTICO: Recibe la foto ya recortada en bytes, devuelve los 4 colores
+  Future<List<Color>?> procesarImagenEstatica(Uint8List bytesRecortados) async {
     try {
-      // Si por alguna razón los modelos aún no cargan, esperamos
       if (_yoloInterpreter == null || _cnnInterpreter == null) {
         await _inicializarModelos();
         if (_yoloInterpreter == null || _cnnInterpreter == null) return null;
       }
 
-      // 1. Damos un respiro al procesador para evitar el ANR (Application Not Responding)
-      await Future.delayed(Duration.zero); 
-      
-      img.Image? imagenOriginal = _convertirYUV420aRGB(imagenCamara);
-      if (imagenOriginal == null) return null;
+      // Convertir la imagen que ya viene recortada a objeto Image
+      img.Image? imagenCuadrada = img.decodeImage(bytesRecortados);
+      if (imagenCuadrada == null) return null;
 
-      // 2. Recortamos la imagen al cuadrado central
-      int tamanoRecorte = min(imagenOriginal.width, imagenOriginal.height);
-      int offsetX = (imagenOriginal.width - tamanoRecorte) ~/ 2;
-      int offsetY = (imagenOriginal.height - tamanoRecorte) ~/ 2;
-      
-      img.Image imagenCuadrada = img.copyCrop(
-        imagenOriginal, 
-        x: offsetX, y: offsetY, width: tamanoRecorte, height: tamanoRecorte
-      );
-
-      // 3. Respiro antes de la matemática pesada de YOLO
-      await Future.delayed(Duration.zero); 
-      
+      // 1. Ejecutar YOLO para encontrar las 4 piezas
       List<Rect> boxes = _ejecutarYOLO(imagenCuadrada);
-      
       if (boxes.length != 4) return null;
 
-      // 4. Ordenar espacialmente [SupIzq, SupDer, InfIzq, InfDer]
+      // 2. Ordenar las cajas espacialmente [SupIzq, SupDer, InfIzq, InfDer]
       boxes = _ordenarCajas2x2(boxes);
 
-      // 5. Respiro antes de la clasificación de colores
-      await Future.delayed(Duration.zero); 
-      
+      // 3. Ejecutar CNN para extraer el color de cada caja
       List<Color> coloresDetectados = [];
       for (Rect box in boxes) {
         Color color = _recortarYClasificarCNN(imagenCuadrada, box);
@@ -107,25 +77,20 @@ class ServicioIAVision extends GetxService {
       return coloresDetectados;
 
     } catch (e, stacktrace) {
-      debugPrint("🚨 Error interno IA: $e\n$stacktrace");
+      debugPrint("🚨 Error interno IA Local: $e\n$stacktrace");
       return null;
     }
   }
 
-  /// FASE 1: Detección con YOLOv8 (Lectura Dinámica)
+  /// FASE 1: Detección con YOLOv8
   List<Rect> _ejecutarYOLO(img.Image imagenCentro) {
+    // Redimensionamos a 640x640 para que coincida con el tensor esperado
     img.Image imagenRedimensionada = img.copyResize(imagenCentro, width: _yoloSize, height: _yoloSize);
 
-    var tensorEntrada = List.generate(
-      1, (i) => List.generate(
-        _yoloSize, (y) => List.generate(
-          _yoloSize, (x) {
-            final pixel = imagenRedimensionada.getPixel(x, y);
-            return [pixel.r / 255.0, pixel.g / 255.0, pixel.b / 255.0];
-          }
-        )
-      )
-    );
+    var tensorEntrada = List.generate(1, (i) => List.generate(_yoloSize, (y) => List.generate(_yoloSize, (x) {
+      final pixel = imagenRedimensionada.getPixel(x, y);
+      return [pixel.r / 255.0, pixel.g / 255.0, pixel.b / 255.0];
+    })));
 
     final outputShape = _yoloInterpreter!.getOutputTensor(0).shape; 
     final int numCoordenadasYClases = outputShape[1]; 
@@ -166,62 +131,65 @@ class ServicioIAVision extends GetxService {
     return detecciones.map((e) => e.rect).toList();
   }
 
-  /// FASE 2: Clasificación de Colores con la CNN (Conversión BGR)
+  /// FASE 2: Extracción de Color utilizando la CNN (clasificador_colores.tflite)
   Color _recortarYClasificarCNN(img.Image imagenOriginal, Rect boxNormalizado) {
+    if (_cnnInterpreter == null) {
+      debugPrint("⚠️ CNN no inicializada. Devolviendo blanco por defecto.");
+      return Colors.white;
+    }
+
+    // 1. Calcular coordenadas absolutas de la caja detectada por YOLO
     int px = (boxNormalizado.left * imagenOriginal.width).round();
     int py = (boxNormalizado.top * imagenOriginal.height).round();
     int pw = (boxNormalizado.width * imagenOriginal.width).round();
     int ph = (boxNormalizado.height * imagenOriginal.height).round();
 
-    int offsetRecorteX = (pw * 0.20).round();
-    int offsetRecorteY = (ph * 0.20).round();
-    int anchoPuro = (pw * 0.60).round();
-    int altoPuro = (ph * 0.60).round();
+    px = px.clamp(0, imagenOriginal.width - 1);
+    py = py.clamp(0, imagenOriginal.height - 1);
+    pw = pw.clamp(1, imagenOriginal.width - px);
+    ph = ph.clamp(1, imagenOriginal.height - py);
 
+    // 2. Extraer exactamente el área del sticker
     img.Image pegatinaCruda = img.copyCrop(
       imagenOriginal, 
-      x: px + offsetRecorteX, 
-      y: py + offsetRecorteY, 
-      width: anchoPuro, 
-      height: altoPuro
+      x: px, 
+      y: py, 
+      width: pw, 
+      height: ph
     );
 
-    img.Image pegatina64 = img.copyResize(pegatinaCruda, width: _cnnSize, height: _cnnSize);
+    // 3. Redimensionar al tamaño esperado por tu modelo CNN (64x64)
+    img.Image pegatinaResized = img.copyResize(pegatinaCruda, width: _cnnSize, height: _cnnSize);
 
-    var tensorEntrada = List.generate(
-      1, (i) => List.generate(
-        _cnnSize, (y) => List.generate(
-          _cnnSize, (x) {
-            final pixel = pegatina64.getPixel(x, y);
-            
-            // Normalización de Transfer Learning (-1.0 a 1.0)
-            return [
-              (pixel.r - 127.5) / 127.5, 
-              (pixel.g - 127.5) / 127.5, 
-              (pixel.b - 127.5) / 127.5
-            ];
-          }
-        )
-      )
-    );
+    // 4. Preparar el Tensor de Entrada [1, 64, 64, 3] (Normalizado de 0.0 a 1.0)
+    var tensorEntrada = List.generate(1, (i) => List.generate(_cnnSize, (y) => List.generate(_cnnSize, (x) {
+      final pixel = pegatinaResized.getPixel(x, y);
+      return [pixel.r / 255.0, pixel.g / 255.0, pixel.b / 255.0];
+    })));
 
-    var tensorSalida = List.generate(1, (_) => List.filled(6, 0.0));
+    // 5. Preparar el Tensor de Salida [1, 6] (Probabilidades para las 6 clases)
+    var tensorSalida = List.generate(1, (i) => List.filled(6, 0.0));
 
+    // 6. Ejecutar Inferencia de la CNN
     _cnnInterpreter!.run(tensorEntrada, tensorSalida);
 
-    int indiceGanador = 0;
-    double confianzaMaxima = tensorSalida[0][0];
-    for (int i = 1; i < 6; i++) {
-      if (tensorSalida[0][i] > confianzaMaxima) {
-        confianzaMaxima = tensorSalida[0][i];
-        indiceGanador = i;
+    // 7. Encontrar la clase con la probabilidad más alta (ArgMax)
+    List<double> probabilidades = tensorSalida[0];
+    int indiceMejorClase = 0;
+    double maximaProbabilidad = probabilidades[0];
+    
+    for (int i = 1; i < probabilidades.length; i++) {
+      if (probabilidades[i] > maximaProbabilidad) {
+        maximaProbabilidad = probabilidades[i];
+        indiceMejorClase = i;
       }
     }
 
-    return _etiquetasColores[indiceGanador];
-  }
+    debugPrint("🎨 Color CNN: ${_etiquetasColores[indiceMejorClase]} (Confianza: ${(maximaProbabilidad * 100).toStringAsFixed(1)}%)");
 
-  // --- MÉTODOS AUXILIARES ---
+    // 8. Retornar el color mapeado
+    return _etiquetasColores[indiceMejorClase];
+  }
 
   List<Rect> _ordenarCajas2x2(List<Rect> boxes) {
     if (boxes.length != 4) return boxes;
@@ -261,65 +229,6 @@ class ServicioIAVision extends GetxService {
     double areaA = a.width * a.height;
     double areaB = b.width * b.height;
     return areaInterseccion / (areaA + areaB - areaInterseccion);
-  }
-
-  img.Image? _convertirYUV420aRGB(CameraImage image) {
-    try {
-      if (image.format.group == ImageFormatGroup.yuv420) {
-        return _procesarYUV420(image);
-      } else if (image.format.group == ImageFormatGroup.bgra8888) {
-        return img.Image.fromBytes(
-          width: image.width, height: image.height,
-          bytes: image.planes[0].bytes.buffer,
-          order: img.ChannelOrder.bgra,
-        );
-      }
-    } catch (e) {
-      debugPrint("Error formato cámara: $e");
-    }
-    return null;
-  }
-
-  img.Image _procesarYUV420(CameraImage image) {
-    final int width = image.width;
-    final int height = image.height;
-    
-    final img.Image rgbImage = img.Image(width: height, height: width);
-
-    final Uint8List yPlane = image.planes[0].bytes;
-    final Uint8List uPlane = image.planes[1].bytes;
-    final Uint8List vPlane = image.planes[2].bytes;
-
-    final int yRowStride = image.planes[0].bytesPerRow;
-    final int uvRowStride = image.planes[1].bytesPerRow;
-    final int uvPixelStride = image.planes[1].bytesPerPixel ?? 1;
-
-    for (int y = 0; y < height; y++) {
-      int uvRow = y >> 1;
-      int yPos = y * yRowStride;
-      int uvPosBase = uvRow * uvRowStride;
-
-      for (int x = 0; x < width; x++) {
-        int indexY = yPos + x;
-        int uvPos = uvPosBase + (x >> 1) * uvPixelStride;
-
-        if (indexY >= yPlane.length) indexY = yPlane.length - 1;
-        if (uvPos >= uPlane.length) uvPos = uPlane.length - 1;
-        if (uvPos >= vPlane.length) uvPos = vPlane.length - 1;
-
-        int yp = yPlane[indexY];
-        int up = uPlane[uvPos];
-        int vp = vPlane[uvPos];
-
-        int r = (yp + vp * 1436 / 1024 - 179).round().clamp(0, 255);
-        int g = (yp - up * 46549 / 131072 + 44 - vp * 93604 / 131072 + 91).round().clamp(0, 255);
-        int b = (yp + up * 1814 / 1024 - 227).round().clamp(0, 255);
-
-        rgbImage.setPixelRgb(y, width - x - 1, r, g, b);
-      }
-    }
-    
-    return rgbImage;
   }
 }
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:get/get.dart';
-import 'package:image/image.dart' as img; // 🔥 IMPORTANTE PARA RECORTAR LA IMAGEN
+import 'package:image/image.dart' as img; 
 import '../../servicios/ia/servicio_ia_vision.dart';
 import '../../servicios/ia/servicio_gemini_vision.dart';
 import '../../gestores/globales/gestor_configuracion.dart';
@@ -11,7 +11,6 @@ class Camara2x2Controller extends GetxController with WidgetsBindingObserver {
   bool camaraInicializada = false;
   List<Color>? coloresDetectados; 
   bool _procesandoFotograma = false;
-  int _ultimoFrameProcesado = 0;
 
   bool get esModoGemini => Get.find<GestorConfiguracion>().usarGeminiAPI.value;
   bool get estaProcesando => _procesandoFotograma;
@@ -48,51 +47,33 @@ class Camara2x2Controller extends GetxController with WidgetsBindingObserver {
         orElse: () => cameras.first,
       );
 
+      // Usamos resolución alta siempre, ya que ahora tomamos fotos estáticas
+      
       controlador = CameraController(
         cameraTrasera,
-        esModoGemini ? ResolutionPreset.high : ResolutionPreset.medium,
+        ResolutionPreset.high,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420, 
       );
 
       await controlador!.initialize();
-      camaraInicializada = true;
-      update(['camara']); 
+      
+      // 🔥 NUEVO: Desactivar el flash permanentemente para evitar reflejos
+      await controlador!.setFlashMode(FlashMode.off);
+      
+      // Bloquear el enfoque y bajar un poco la exposición para matar brillos
+      await controlador!.setFocusMode(FocusMode.locked);
+      // Bajar la exposición ayuda a saturar los colores y reducir el reflejo de la luz
+      await controlador!.setExposureOffset(-0.5); 
 
-      if (!esModoGemini) {
-        controlador!.startImageStream(_enviarFotogramaAIA);
-      }
+      camaraInicializada = true;
+      update(['camara']);
     } catch (e) {
       debugPrint("Error al inicializar la cámara: $e");
     }
   }
 
-  void _enviarFotogramaAIA(CameraImage imagen) async {
-    if (_procesandoFotograma) return;
-    final tiempoActual = DateTime.now().millisecondsSinceEpoch;
-    if (tiempoActual - _ultimoFrameProcesado < 800) return;
-
-    _procesandoFotograma = true;
-    _ultimoFrameProcesado = tiempoActual;
-
-    try {
-      final servicioIA = Get.find<ServicioIAVision>();
-      final colores = await servicioIA.procesarFrame2x2(imagen);
-      
-      if (colores != null && colores.length == 4) {
-        coloresDetectados = colores;
-        update(['resultados']); 
-      }
-    } catch (e) {
-      // Ignorar errores del feed continuo
-    } finally {
-      await Future.delayed(const Duration(milliseconds: 50));
-      _procesandoFotograma = false; 
-    }
-  }
-
-  // 🔥 NUEVA LÓGICA DE CAPTURA CON RECORTE PARA GEMINI
-  Future<void> capturarFotoParaGemini() async {
+  // 🔥 FLUJO ÚNICO DE CAPTURA (Tanto para YOLO como para Gemini)
+  Future<void> capturarFoto() async {
     if (_procesandoFotograma || controlador == null || !controlador!.value.isInitialized) return;
     
     Get.find<GestorConfiguracion>().ejecutarVibracion();
@@ -101,16 +82,14 @@ class Camara2x2Controller extends GetxController with WidgetsBindingObserver {
     update(['resultados']);
 
     try {
-      // 1. Tomar foto original
+      // 1. Tomar foto original en alta calidad
       final XFile archivoFoto = await controlador!.takePicture();
       final bytesOriginales = await archivoFoto.readAsBytes();
 
-      // 2. RECORTAR LA IMAGEN AL CENTRO (Para mejorar la precisión)
-      // Esto simula el cuadro verde de la interfaz
       img.Image? imagenOriginal = img.decodeImage(bytesOriginales);
       
       if (imagenOriginal != null) {
-        // Calculamos un recorte del 70% del ancho/alto
+        // 2. RECORTAR LA IMAGEN AL CUADRO VERDE
         int ladoMenor = imagenOriginal.width < imagenOriginal.height ? imagenOriginal.width : imagenOriginal.height;
         int tamanoRecorte = (ladoMenor * 0.7).toInt(); 
         int offsetX = (imagenOriginal.width - tamanoRecorte) ~/ 2;
@@ -124,35 +103,40 @@ class Camara2x2Controller extends GetxController with WidgetsBindingObserver {
           height: tamanoRecorte
         );
 
-        // Convertir la imagen recortada de nuevo a bytes para enviarla
-        final bytesParaGemini = img.encodeJpg(imagenRecortada);
+        final bytesListos = img.encodeJpg(imagenRecortada);
+        List<Color>? colores;
         
-        // 3. Enviar a Gemini
-        final servicioGemini = Get.find<ServicioGeminiVision>();
-        final colores = await servicioGemini.procesarFoto2x2(bytesParaGemini);
+        // 3. DECIDIR A QUÉ MOTOR ENVIAR LA FOTO RECORTADA
+        if (esModoGemini) {
+          final servicioGemini = Get.find<ServicioGeminiVision>();
+          colores = await servicioGemini.procesarFoto2x2(bytesListos);
+        } else {
+          final servicioLocal = Get.find<ServicioIAVision>();
+          colores = await servicioLocal.procesarImagenEstatica(bytesListos);
+        }
 
+        // 4. VERIFICAR RESULTADO
         if (colores != null && colores.length == 4) {
           coloresDetectados = colores;
         } else {
-          _mostrarErrorGemini();
+          _mostrarError();
         }
       } else {
-         _mostrarErrorGemini();
+         _mostrarError();
       }
-
     } catch (e) {
-      debugPrint("Error en captura Gemini: $e");
-      _mostrarErrorGemini();
+      debugPrint("Error en captura: $e");
+      _mostrarError();
     } finally {
       _procesandoFotograma = false;
       update(['resultados']);
     }
   }
 
-  void _mostrarErrorGemini() {
+  void _mostrarError() {
      Get.snackbar(
-        'Análisis fallido',
-        'Intenta acercar más el cubo al cuadro verde y evita reflejos de luz.',
+        'No se detectó el cubo',
+        'Acerca más el cubo al recuadro, evita reflejos y asegúrate de tener buena luz.',
         backgroundColor: Colors.red.shade800,
         colorText: Colors.white,
         snackPosition: SnackPosition.TOP,
@@ -161,9 +145,6 @@ class Camara2x2Controller extends GetxController with WidgetsBindingObserver {
 
   Future<void> _cerrarCamaraSegura() async {
     try {
-      if (controlador != null && controlador!.value.isStreamingImages) {
-        await controlador!.stopImageStream();
-      }
       await controlador?.dispose();
       controlador = null;
     } catch (e) {
@@ -171,19 +152,19 @@ class Camara2x2Controller extends GetxController with WidgetsBindingObserver {
     }
   }
 
-  void aceptarLectura() async {
+  void aceptarLectura() {
     Get.find<GestorConfiguracion>().ejecutarVibracion();
     if (coloresDetectados != null && coloresDetectados!.length == 4) {
       _procesandoFotograma = true; 
-      await _cerrarCamaraSegura();
+      // Dejamos que GetX cierre la cámara automáticamente al salir
       Get.back(result: coloresDetectados);
     }
   }
 
-  void cancelarYVolver() async {
+  void cancelarYVolver() {
     Get.find<GestorConfiguracion>().ejecutarVibracion();
     _procesandoFotograma = true;
-    await _cerrarCamaraSegura();
+    // Dejamos que GetX cierre la cámara automáticamente al salir
     Get.back();
   }
 
@@ -195,7 +176,7 @@ class Camara2x2Controller extends GetxController with WidgetsBindingObserver {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// VISTA INTERFAZ GRÁFICA (Sin cambios, se mantiene igual)
+// VISTA INTERFAZ GRÁFICA
 // ═══════════════════════════════════════════════════════════════
 
 class PantallaCamara2x2 extends StatelessWidget {
@@ -283,12 +264,12 @@ class PantallaCamara2x2 extends StatelessWidget {
                         children: [
                           Icon(
                             ctrl.esModoGemini ? Icons.cloud_sync_rounded : Icons.bolt_rounded, 
-                            color: ctrl.esModoGemini ? Colors.blueAccent : Colors.yellowAccent, 
+                            color: ctrl.esModoGemini ? Colors.blueAccent : Colors.orangeAccent, 
                             size: 16
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            ctrl.esModoGemini ? "Motor Gemini (Nube)" : "Motor Rápido (Local)",
+                            ctrl.esModoGemini ? "Motor Gemini (Nube)" : "Motor YOLO (Local)",
                             style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                           ),
                         ],
@@ -405,35 +386,25 @@ class PantallaCamara2x2 extends StatelessWidget {
                                   const CircularProgressIndicator(strokeWidth: 3),
                                   const SizedBox(height: 16),
                                   Text(
-                                    ctrl.esModoGemini ? "Gemini analizando la imagen..." : "Buscando cubo...", 
+                                    ctrl.esModoGemini ? "Gemini analizando la imagen..." : "YOLO procesando la foto...", 
                                     style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.w600)
                                   )
                                 ],
                               ),
                             );
-                          } else if (ctrl.esModoGemini) {
+                          } else {
+                            // BOTÓN PRINCIPAL UNIFICADO
                             return SizedBox(
                               width: double.infinity,
                               height: 60,
                               child: FilledButton.icon(
-                                onPressed: ctrl.capturarFotoParaGemini,
+                                onPressed: ctrl.capturarFoto,
                                 icon: const Icon(Icons.camera_alt_rounded, size: 28),
                                 label: const Text("CAPTURAR FOTO", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.blueAccent,
+                                  backgroundColor: ctrl.esModoGemini ? Colors.blueAccent : Colors.orangeAccent.shade700,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                                 ),
-                              ),
-                            );
-                          } else {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 30),
-                              child: Column(
-                                children: [
-                                  const CircularProgressIndicator(strokeWidth: 3),
-                                  const SizedBox(height: 16),
-                                  Text("Centra el cubo en el recuadro...", style: TextStyle(fontSize: 14, color: Colors.grey[600]))
-                                ],
                               ),
                             );
                           }

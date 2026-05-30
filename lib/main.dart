@@ -6,7 +6,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'gestores/globales/gestor_configuracion.dart';
 import 'gestores/globales/gestor_estadisticas.dart';
 import 'servicios/ia/servicio_ia_vision.dart';
-import 'servicios/ia/servicio_gemini_vision.dart'; // 🔥 Nuevo servicio integrado
+import 'servicios/ia/servicio_gemini_vision.dart';
+import 'gestores/globales/gestor_voz.dart';
 import 'rutas/rutas_app.dart';
 import 'rutas/paginas_app.dart';
 
@@ -28,6 +29,7 @@ void main() async {
   
   // 🔥 INYECCIÓN DE GEMINI: Registramos el cliente de la nube de manera global
   Get.put(ServicioGeminiVision());
+  Get.put(GestorVoz());
 
   // 2. Inyectamos los Gestores Globales Reactivos
   Get.put(GestorConfiguracion());

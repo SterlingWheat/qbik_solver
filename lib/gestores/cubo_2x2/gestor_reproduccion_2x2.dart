@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:get/get.dart';
 import '../../modelos/estado_cubo_2x2.dart';
+import '../../gestores/globales/gestor_configuracion.dart';
+import '../../gestores/globales/gestor_voz.dart';
 
 /// Controlador de estado para manejar la "Línea de Tiempo" de la resolución.
 /// Actúa como el motor lógico detrás de los botones de un reproductor de video.
@@ -13,7 +15,9 @@ class GestorReproduccion2x2 extends GetxController {
 
   int _pasoActual = 0;
   bool _estaReproduciendo = false;
-  Timer? _timerReproduccion;
+  
+  // Reemplazamos el Timer por un ID de ciclo para cancelar bucles asíncronos al pausar
+  int _idReproduccionActual = 0; 
 
   GestorReproduccion2x2({
     required EstadoCubo2x2 estadoInicial,
@@ -22,15 +26,18 @@ class GestorReproduccion2x2 extends GetxController {
     _precalcularLineaDeTiempo();
   }
 
-  // En GetX, dispose() se cambia por onClose()
   @override
   void onClose() {
-    _timerReproduccion?.cancel();
+    _estaReproduciendo = false;
+    _idReproduccionActual++;
+    try {
+      Get.find<GestorVoz>().detener();
+    } catch (e) {
+      // Ignorar si el gestor no está disponible
+    }
     super.onClose();
   }
 
-  /// Calcula matemáticamente cómo se ve el cubo en el paso 0, 1, 2... N
-  /// Esto hace que navegar por la interfaz gráfica sea O(1) e instantáneo.
   void _precalcularLineaDeTiempo() {
     _historialEstados = [_estadoInicial];
     EstadoCubo2x2 estadoTemporal = _estadoInicial;
@@ -43,17 +50,28 @@ class GestorReproduccion2x2 extends GetxController {
 
   // --- GETTERS ---
 
-  /// Retorna el estado matemático del cubo en el fotograma actual.
   EstadoCubo2x2 get estadoActual => _historialEstados[_pasoActual];
-
   int get pasoActual => _pasoActual;
   int get totalPasos => algoritmoSolucion.length;
   bool get estaReproduciendo => _estaReproduciendo;
 
-  /// Retorna el movimiento exacto que se debe aplicar en este momento (Ej: "R'")
   String get movimientoActualStr {
     if (_pasoActual == 0) return "Inicio";
     return algoritmoSolucion[_pasoActual - 1];
+  }
+
+  // --- LÓGICA DE NARRACIÓN DE VOZ ---
+  
+  Future<void> _narrarPasoActual() async {
+    try {
+      final gestorConfig = Get.find<GestorConfiguracion>();
+      if (gestorConfig.narracionVozActiva.value && _pasoActual > 0) {
+        // Al usar await aquí, pausamos la ejecución hasta que la voz termine
+        await Get.find<GestorVoz>().narrarMovimiento(movimientoActualStr);
+      }
+    } catch (e) {
+      // Prevenir cuelgues si el gestor de voz no existe
+    }
   }
 
   // --- CONTROLES DEL REPRODUCTOR ---
@@ -62,7 +80,6 @@ class GestorReproduccion2x2 extends GetxController {
     if (_estaReproduciendo) {
       pausar();
     } else {
-      // Si ya terminó, reinicia desde cero al presionar Play
       if (_pasoActual >= totalPasos) {
         _pasoActual = 0;
       }
@@ -70,47 +87,81 @@ class GestorReproduccion2x2 extends GetxController {
     }
   }
 
-  void _reproducir() {
+  void _reproducir() async {
     _estaReproduciendo = true;
-    update(); // Reemplaza notifyListeners()
+    _idReproduccionActual++;
+    final int idCiclo = _idReproduccionActual; // Guardamos el ID de este bucle específico
+    update();
 
-    _timerReproduccion = Timer.periodic(const Duration(milliseconds: 1000), (timer) {
-      if (_pasoActual < totalPasos) {
-        _pasoActual++;
-        update(); // Reemplaza notifyListeners()
+    // Narramos el paso en el que estamos antes de empezar a avanzar
+    if (_pasoActual > 0) {
+      await _narrarPasoActual();
+    }
+
+    // Bucle asíncrono: avanza solo si seguimos reproduciendo y es el mismo clic de Play
+    while (_estaReproduciendo && _pasoActual < totalPasos && _idReproduccionActual == idCiclo) {
+      
+      // Pequeña pausa natural antes del siguiente giro
+      await Future.delayed(const Duration(milliseconds: 400));
+      if (!_estaReproduciendo || _idReproduccionActual != idCiclo) break;
+
+      _pasoActual++;
+      update();
+
+      final bool vozActiva = Get.find<GestorConfiguracion>().narracionVozActiva.value;
+      
+      if (vozActiva) {
+        // El bucle se detiene automáticamente aquí hasta que la IA termine de hablar
+        await _narrarPasoActual();
       } else {
-        pausar(); // Se detiene automáticamente al llegar al final
+        // Si no hay voz, aplicamos un temporizador estándar de 1 segundo
+        await Future.delayed(const Duration(milliseconds: 1000));
       }
-    });
+    }
+
+    // Al terminar el algoritmo, auto-pausar
+    if (_pasoActual >= totalPasos && _idReproduccionActual == idCiclo) {
+      pausar();
+    }
   }
 
   void pausar() {
-    _timerReproduccion?.cancel();
     _estaReproduciendo = false;
-    update(); // Reemplaza notifyListeners()
+    _idReproduccionActual++; // Esto "rompe" instantáneamente el bucle while superior
+    
+    try {
+      Get.find<GestorVoz>().detener();
+    } catch (e) {
+      // Ignorar
+    }
+    
+    update(); 
   }
 
   void avanzar() {
-    pausar();
+    pausar(); 
     if (_pasoActual < totalPasos) {
       _pasoActual++;
-      update(); // Reemplaza notifyListeners()
+      _narrarPasoActual(); 
+      update(); 
     }
   }
 
   void retroceder() {
-    pausar();
+    pausar(); 
     if (_pasoActual > 0) {
       _pasoActual--;
-      update(); // Reemplaza notifyListeners()
+      _narrarPasoActual(); 
+      update(); 
     }
   }
 
   void saltarA(int paso) {
-    pausar();
+    pausar(); 
     if (paso >= 0 && paso <= totalPasos) {
       _pasoActual = paso;
-      update(); // Reemplaza notifyListeners()
+      _narrarPasoActual(); 
+      update(); 
     }
   }
 }
